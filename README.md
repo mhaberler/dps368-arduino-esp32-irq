@@ -12,7 +12,7 @@ This  example driver works around the problem and works fine with  arduino-esp32
 
 # hardware setup
 
-- ESP32: M5Stack-CoreS3
+- ESP32: M5Stack-CoreS3 (tensilica) and M5Stamp C3U (RISC-V)
 - [DPS368 Pressure Shield2Go](https://www.mouser.at/datasheet/2/196/Infineon_DPS368_Shield2Go_Quick_Start_Guide_GS_v01-3131997.pdf) breakout board
 - I2C connection via "red port" on CoreS3
 - IRQ line connected to "blue port" pin17
@@ -22,4 +22,10 @@ This  example driver works around the problem and works fine with  arduino-esp32
 
 Build system was PlatformIO.
 
+The [dps368_probe()](https://github.com/mhaberler/dps368-arduino-esp32-irq/blob/main/irqtest/dps3xxprobe.cpp) function can be used to verify that
+
+- the device is responding
+- initialisation works
+- interrupts are detected
+- the number of interrupts seen makes sense
 
