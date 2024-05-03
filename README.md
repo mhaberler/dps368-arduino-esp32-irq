@@ -18,6 +18,8 @@ This  example driver works around the problem and works fine with  arduino-esp32
 - IRQ line connected to "blue port" pin17
 - Jumper J2 soldered to connect SDO and IRQ pin, and a pulldown resistor - this also sets device address to 0x76
 
+# software setup
+
 Build system was PlatformIO.
 
 
