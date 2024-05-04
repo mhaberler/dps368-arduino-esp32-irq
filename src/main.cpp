@@ -1,57 +1,69 @@
 #include <M5Unified.h>
 #include <Dps3xx.h>
 
+#define TEMP_COUNT_MASK 7
+
 typedef struct {
     uint32_t timestamp;
     int16_t pin;
 } irqmsg_t;
 
 QueueHandle_t irq_queue;
-Dps3xx Dps3xxPressureSensor = Dps3xx();
+Dps3xx dps3 = Dps3xx();
 int16_t irq_pin = IRQ_PIN;
 uint32_t count;
+uint32_t irq_queue_full;
 
 // first level interrupt handler
 // only notify 2nd level handler task passing any parameters
 static void IRAM_ATTR  irq_handler(void *param) {
     int16_t *pin = (int16_t *)param;
-    static uint32_t counter;
     irqmsg_t msg;
     msg.pin = *pin;
     msg.timestamp = micros();
-    xQueueSendFromISR(irq_queue, (const void*) &msg, NULL);
+    if (xQueueSendFromISR(irq_queue, (const void*) &msg, NULL) != pdTRUE) {
+        irq_queue_full++;
+    }
 }
 
 // 2nd level interrupt handler
-// in user context - can do Wire I/O etc
+// runs in user context - can do Wire I/O, log etc
 void soft_irq(void* arg) {
     irqmsg_t msg;
-    uint8_t pressureCount = 20;
-    float pressure[pressureCount];
-    uint8_t temperatureCount = 20;
-    float temperature[temperatureCount];
+
     for (;;) {
         if (xQueueReceive(irq_queue, &msg, portMAX_DELAY)) {
             float value;
-            int16_t rc ;
-            rc = Dps3xxPressureSensor.getSingleResult(value);
-            if (Dps3xxPressureSensor.getIntStatusPrsReady()) {
-                log_i("pin=%d timestamp=%u pressure=%.2f kPa rc=%d",
-                      msg.pin, msg.timestamp, value, rc);
-            } else {
-                log_i("pin=%d timestamp=%u temperature=%.2f° rc=%d",
-                      msg.pin, msg.timestamp, value, rc);
-            };
+            int16_t ret ;
 
-            // start a new measurent
-            // every 8 pressure measurements we start a temperature measurement to keep
-            // correction accurate
+            if ((ret = dps3.getSingleResult(value)) != 0) {
+                log_e("getSingleResult: %d",ret);
+                continue;
+            }
+
+            if ((ret = dps3.getIntStatusPrsReady()) < 0) {
+                log_e("getIntStatusPrsReady: %d",ret);
+                continue;
+            }
+            // ret == 0 || ret == 1
+            log_i("pin=%d timestamp=%u %s=%.2f %s",
+                  msg.pin, msg.timestamp,
+                  ret ? "pressure" : "temperature",
+                  value,
+                  ret ? "kPa"  : "°C");
+
+            // start a new measurement cycle
+            // every count & TEMP_COUNT_MASK pressure measurements start a temperature measurement
+            // to keep correction accurate
             count++;
-            if (!(count & 7)) {
-                log_i("start temperature measurement");
-                rc = Dps3xxPressureSensor.startMeasureTempOnce(TEMP_OVERSAMPLING_RATE);
+            if (!(count & TEMP_COUNT_MASK)) {
+                if ((ret = dps3.startMeasureTempOnce(TEMP_OVERSAMPLING_RATE)) != 0) {
+                    log_e("startMeasureTempOnce: %d",ret);
+                }
             } else {
-                rc = Dps3xxPressureSensor.startMeasurePressureOnce(PRS_OVERSAMPLING_RATE);
+                if ((ret = dps3.startMeasurePressureOnce(PRS_OVERSAMPLING_RATE)) != 0) {
+                    log_e("startMeasurePressureOnce: %d",ret);
+                }
             }
         }
     }
@@ -59,7 +71,7 @@ void soft_irq(void* arg) {
 
 
 void setup() {
-    int rc;
+    int16_t ret;
 
     delay(3000);
     M5.begin();
@@ -74,22 +86,36 @@ void setup() {
     pinMode(IRQ_PIN, INPUT);
     attachInterruptArg(digitalPinToInterrupt(irq_pin), irq_handler,(void *)&irq_pin, FALLING);
 
-    Dps3xxPressureSensor.begin(Wire, DPS3XX_I2C_ADDR);
+    dps3.begin(Wire, DPS3XX_I2C_ADDR);
 
-    rc = Dps3xxPressureSensor.setInterruptSources(DPS3xx_BOTH_INTR, 0);
-    if (rc) {
-        log_i("setInterruptSources: %d",rc);
+    // identify the device
+    log_i("DPS3xx: product 0x%x revision 0x%x",
+          dps3.getProductId(),
+          dps3.getRevisionId());
+
+    // measure temperature once for pressure compensation
+    float temperature;
+    uint8_t oversampling = TEMP_OVERSAMPLING_RATE;
+    if ((ret = dps3.measureTempOnce(temperature, oversampling)) != 0) {
+        log_e("measureTempOnce failed ret=%d", ret);
+    } else {
+        log_i("dps3xx compensating for %.2f°", temperature);
     }
+
+    // define what causes an interrupt: both temperature and pressure conversion
+    if ((ret = dps3.setInterruptSources(DPS3xx_BOTH_INTR, 0)) != 0) {
+        log_i("setInterruptSources: %d",ret);
+    }
+
     // clear interrupt flags by reading the IRQ status register
-    rc = Dps3xxPressureSensor.getIntStatusPrsReady();
-    if (rc) {
-        log_i("getIntStatusPrsReady: %d",rc);
+    if ((ret = dps3.getIntStatusPrsReady()) != 0) {
+        log_i("getIntStatusPrsReady: %d",ret);
     }
 
-    // one-shot conversion
-    rc = Dps3xxPressureSensor.startMeasurePressureOnce(PRS_OVERSAMPLING_RATE);
-    if (rc) {
-        log_e("startMeasurePressureOnce: %d",rc);
+    // start one-shot conversion
+    // interrupt will be posted at end of conversion
+    if ((ret = dps3.startMeasurePressureOnce(PRS_OVERSAMPLING_RATE)) != 0) {
+        log_e("startMeasurePressureOnce: %d",ret);
     }
 }
 
