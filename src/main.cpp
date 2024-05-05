@@ -5,7 +5,7 @@
 
 typedef struct {
     uint32_t timestamp;
-    int16_t pin;
+    uint8_t device_id;
 } irqmsg_t;
 
 QueueHandle_t irq_queue;
@@ -13,13 +13,13 @@ Dps3xx dps3 = Dps3xx();
 int16_t irq_pin = IRQ_PIN;
 uint32_t count;
 uint32_t irq_queue_full;
+uint32_t device = 42;
 
 // first level interrupt handler
 // only notify 2nd level handler task passing any parameters
 static void IRAM_ATTR  irq_handler(void *param) {
-    int16_t *pin = (int16_t *)param;
     irqmsg_t msg;
-    msg.pin = *pin;
+    msg.device_id = ((uint32_t)param) % 0xff;
     msg.timestamp = micros();
     if (xQueueSendFromISR(irq_queue, (const void*) &msg, NULL) != pdTRUE) {
         irq_queue_full++;
@@ -46,8 +46,8 @@ void soft_irq(void* arg) {
                 continue;
             }
             // ret == 0 || ret == 1
-            log_i("pin=%d timestamp=%u %s=%.2f %s",
-                  msg.pin, msg.timestamp,
+            log_i("dev=%d timestamp=%u %s=%.2f %s",
+                  msg.device_id, msg.timestamp,
                   ret ? "pressure" : "temperature",
                   value,
                   ret ? "kPa"  : "°C");
@@ -84,7 +84,7 @@ void setup() {
     xTaskCreate(soft_irq, "soft_irq", 2048, NULL, 10, NULL);
 
     pinMode(IRQ_PIN, INPUT);
-    attachInterruptArg(digitalPinToInterrupt(irq_pin), irq_handler,(void *)&irq_pin, FALLING);
+    attachInterruptArg(digitalPinToInterrupt(irq_pin), irq_handler,(void *)device, FALLING);
 
     dps3.begin(Wire, DPS3XX_I2C_ADDR);
 
