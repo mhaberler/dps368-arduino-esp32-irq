@@ -29,3 +29,9 @@ The [dps368_probe()](https://github.com/mhaberler/dps368-arduino-esp32-irq/blob/
 - interrupts are detected
 - the number of interrupts seen makes sense
 
+# multiple device support
+
+the [multiple-device branch](https://github.com/mhaberler/dps368-arduino-esp32-irq/blob/multiple-devices/src/main.cpp) contains a more advanced example for:
+- interrupt-driven operation of multiple DPS3xx sensors on any bus
+- supports arbitrary number of sensors
+- individual per-sensor configuration
